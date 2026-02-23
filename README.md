@@ -1,36 +1,227 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Simple Realtime Live Chat (Next.js + Convex + Clerk)
 
-## Getting Started
+This project is intentionally **simple and beginner-friendly**.
+It gives you one-to-one realtime chat with authentication and a clean responsive UI.
 
-First, run the development server:
+---
+
+## 1) Step-by-step explanation (beginner friendly)
+
+## Step 1: What stack are we using?
+
+- **Next.js App Router** = frontend + routing (`app/` folder)
+- **TypeScript** = type safety
+- **Clerk** = signup/signin/logout and user session
+- **Convex** = backend API + database + realtime updates
+- **Tailwind CSS** = quick responsive styling
+
+If you come from React + Express + MongoDB:
+
+- Convex functions (`query`, `mutation`) are like your Express routes.
+- Convex tables are like MongoDB collections.
+- `useQuery` is like “fetch data”, but live and auto-updating.
+- `useMutation` is like POST/PUT requests.
+
+## Step 2: Auth with Clerk
+
+Clerk handles all auth UI and session logic:
+
+- `<SignUp />` page for registration
+- `<SignIn />` page for login
+- `<UserButton />` for profile + logout
+- `middleware.ts` protects `/chat`
+
+No manual JWT creation/verification needed.
+
+## Step 3: Convex backend schema
+
+We keep only **2 tables**:
+
+1. `users`
+2. `messages`
+
+`users` stores Clerk user info in Convex.
+`messages` stores one-to-one messages.
+
+## Step 4: Sync Clerk user into Convex
+
+When a logged-in user opens chat, `SyncUser` runs `upsertFromClerk` mutation.
+That ensures each Clerk user exists in Convex `users` table.
+
+## Step 5: User list + realtime chat
+
+- Left sidebar: `listOtherUsers` query returns everyone except me.
+- Chat window: `listForConversation` query returns both directions of messages.
+- Send button: `send` mutation inserts message.
+- Because Convex is realtime, both users instantly see updates.
+
+## Step 6: Responsive layout
+
+- Mobile: stacked layout
+- Tablet/Desktop: sidebar + main chat area
+- Tailwind utility classes keep UI modern and clean.
+
+---
+
+## 2) Folder structure
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+.
+├── convex/
+│   ├── schema.ts
+│   ├── users.ts
+│   ├── messages.ts
+│   └── _generated/
+│       ├── api.ts
+│       └── server.ts
+├── middleware.ts
+├── src/
+│   ├── app/
+│   │   ├── page.tsx
+│   │   ├── layout.tsx
+│   │   ├── globals.css
+│   │   ├── chat/page.tsx
+│   │   ├── sign-in/[[...sign-in]]/page.tsx
+│   │   └── sign-up/[[...sign-up]]/page.tsx
+│   └── components/
+│       ├── providers.tsx
+│       ├── sync-user.tsx
+│       └── chat-shell.tsx
+└── convex.json
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+---
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+## 3) Convex schema & functions
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+## `convex/schema.ts`
 
-## Learn More
+Defines tables and indexes:
 
-To learn more about Next.js, take a look at the following resources:
+- `users`
+  - `clerkUserId`
+  - `email`
+  - `name`
+  - `imageUrl`
+- `messages`
+  - `senderId`
+  - `receiverId`
+  - `body`
+  - `sentAt`
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## `convex/users.ts`
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+- `getCurrentUser`: returns logged-in user from Convex.
+- `listOtherUsers`: returns all users except current user.
+- `upsertFromClerk`: create/update user profile from Clerk data.
 
-## Deploy on Vercel
+## `convex/messages.ts`
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+- `listForConversation(otherUserId)`: returns both sent + received messages sorted by time.
+- `send(receiverId, body)`: saves new message.
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+---
+
+## 4) Clerk setup
+
+## Install and set env values
+
+```bash
+npm install
+# if needed later:
+# npm install @clerk/nextjs convex
+```
+
+Create `.env.local`:
+
+```env
+NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY=pk_test_xxx
+CLERK_SECRET_KEY=sk_test_xxx
+NEXT_PUBLIC_CONVEX_URL=https://your-project.convex.cloud
+```
+
+## Add Clerk middleware
+
+`middleware.ts` protects `/chat` route.
+
+## Add Clerk provider
+
+`src/app/layout.tsx` wraps the app with `<ClerkProvider>`.
+
+## Add auth pages
+
+- `/sign-in`
+- `/sign-up`
+
+---
+
+## 5) Frontend components
+
+## `providers.tsx`
+
+Adds Convex React provider connected to Clerk auth.
+
+## `sync-user.tsx`
+
+After user logs in, syncs Clerk user into Convex `users` table.
+
+## `chat-shell.tsx`
+
+Main chat UI with:
+
+- Sidebar users list
+- Selected conversation messages
+- Message input + send button
+- `useQuery` for live data
+- `useMutation` for sending messages
+
+---
+
+## 6) Simple explanation of realtime flow
+
+1. User sends message.
+2. `send` mutation inserts it into Convex `messages` table.
+3. Convex detects DB change.
+4. Any active `useQuery(listForConversation)` subscribers get new data automatically.
+5. UI re-renders instantly (no manual refresh / polling).
+
+That is why Convex can replace the typical Express + Socket.IO setup for simple realtime apps.
+
+---
+
+## 7) Demo/interview talking points
+
+Use these while presenting:
+
+1. **"I used Clerk to avoid custom auth complexity."**
+   - No manual JWT middleware.
+   - Ready-made sign in/sign up/logout components.
+
+2. **"I used Convex as backend + DB + realtime engine."**
+   - Queries and mutations replace Express routes.
+   - Tables replace MongoDB collections.
+   - Realtime updates are built in.
+
+3. **"Architecture is intentionally simple."**
+   - 2 tables only (`users`, `messages`).
+   - 2 backend files (`users.ts`, `messages.ts`).
+   - 1 main chat UI component.
+
+4. **"Great for beginner explanation."**
+   - Easy mental model.
+   - Clear folder structure.
+   - No advanced patterns or over-engineering.
+
+---
+
+## Run locally
+
+```bash
+npm install
+npx convex dev
+npm run dev
+```
+
+Open `http://localhost:3000`.
+
+> Note: In a normal Convex project, `convex/_generated/*` is auto-generated by `npx convex codegen` / `npx convex dev`.
